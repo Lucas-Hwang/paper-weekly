@@ -1,0 +1,29 @@
+name: PaperWeekly
+
+on:
+  schedule:
+    # UTC 周一 0:00 = 北京时间周一 8:00
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+jobs:
+  send-papers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run PaperWeekly Agent
+        run: node paper-daily-agent.js all
+        env:
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          BAIDU_APPID: ${{ secrets.BAIDU_APPID }}
+          BAIDU_KEY: ${{ secrets.BAIDU_KEY }}

@@ -1,0 +1,107 @@
+{
+  "_comment": "SMTP 配置说明：使用 163 邮箱时，pass 不是登录密码，而是 SMTP 授权码。请到 163 邮箱设置 → IMAP/SMTP 中获取授权码后填入下方。",
+  "_comment_baidu": "百度翻译 API 配置说明：请到 https://fanyi-api.baidu.com/ 注册并开通标准版（免费 5 万字符/天），获取 APP ID 和密钥后填入下方。",
+  "smtp": {
+    "host": "smtp.163.com",
+    "port": 465,
+    "secure": true,
+    "auth": {
+      "user": "huangjiansong0630@163.com",
+      "pass": "XY5ayRZ9bU4DZdhb"
+    },
+    "from": "huangjiansong0630@163.com"
+  },
+  "baiduTranslate": {
+    "appid": "YOUR_BAIDU_APPID",
+    "key": "YOUR_BAIDU_KEY"
+  },
+  "accounts": [
+    {
+      "id": "ai",
+      "name": "AI前沿日报",
+      "topicName": "AI",
+      "recipient": "huangjiansong0630@163.com",
+      "paperLimit": 8,
+      "perTopicLimit": {
+        "LLM": 3,
+        "Agent": 3,
+        "RL": 3
+      },
+      "prompt": "请对以下AI前沿论文进行简要总结，突出核心创新点、实验结果和潜在影响。",
+      "topics": [
+        {
+          "name": "LLM",
+          "keywords": [
+            "large language model",
+            "LLM",
+            "transformer",
+            "reasoning"
+          ],
+          "weight": 5
+        },
+        {
+          "name": "Agent",
+          "keywords": [
+            "agent",
+            "multi-agent",
+            "tool use",
+            "AutoGPT"
+          ],
+          "weight": 5
+        },
+        {
+          "name": "RL",
+          "keywords": [
+            "reinforcement learning",
+            "RLHF",
+            "GRPO",
+            "policy optimization"
+          ],
+          "weight": 5
+        }
+      ]
+    },
+    {
+      "id": "yanyu",
+      "name": "医工交叉日报",
+      "topicName": "医工",
+      "recipient": "huangjiansong0630@163.com",
+      "paperLimit": 8,
+      "perTopicLimit": {
+        "aDBS": 3,
+        "tourette syndrome": 3,
+        "freezing of gait": 3
+      },
+      "prompt": "请对以下医工交叉领域论文进行简要总结，突出技术方法、临床价值和转化前景。",
+      "topics": [
+        {
+          "name": "aDBS",
+          "keywords": [
+            "adaptive deep brain stimulation",
+            "aDBS",
+            "deep brain stimulation"
+          ],
+          "weight": 5
+        },
+        {
+          "name": "tourette syndrome",
+          "keywords": [
+            "tourette syndrome",
+            "Tourette",
+            "tic disorder"
+          ],
+          "weight": 5
+        },
+        {
+          "name": "freezing of gait",
+          "keywords": [
+            "freezing of gait",
+            "FOG",
+            "gait freezing"
+          ],
+          "weight": 5
+        }
+      ]
+    }
+  ]
+}
