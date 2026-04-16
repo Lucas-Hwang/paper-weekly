@@ -58,15 +58,17 @@ async function sendEmail(to, subject, html) {
 }
 
 // ========== 百度翻译 ==========
-async function translateBaidu(text) {
+async function translateBaidu(text, retries = 1) {
   if (!baiduTranslate || !baiduTranslate.appid || !baiduTranslate.key) {
     return text;
   }
+  // 百度标准版单次最长 6000 字符
+  const safeText = text.length > 5800 ? text.substring(0, 5800) + '…' : text;
   const { appid, key } = baiduTranslate;
   const salt = Date.now().toString();
-  const sign = crypto.createHash('md5').update(appid + text + salt + key).digest('hex');
+  const sign = crypto.createHash('md5').update(appid + safeText + salt + key).digest('hex');
   const params = new URLSearchParams({
-    q: text,
+    q: safeText,
     from: 'en',
     to: 'zh',
     appid,
@@ -78,6 +80,10 @@ async function translateBaidu(text) {
     const data = await fetchUrl(url);
     const json = JSON.parse(data);
     if (json.error_code) {
+      if ((json.error_code === '54003' || json.error_code === '54005') && retries > 0) {
+        await new Promise(r => setTimeout(r, 1500));
+        return translateBaidu(safeText, retries - 1);
+      }
       throw new Error(`Baidu API ${json.error_code}: ${json.error_msg}`);
     }
     return json.trans_result.map(r => r.dst).join('\n');
@@ -354,8 +360,9 @@ async function fetchPapersForAccount(account) {
   console.log(`  🌐 开始翻译 ${result.length} 篇论文...`);
   for (const p of result) {
     p.titleZh = await translateBaidu(p.title);
+    await new Promise(r => setTimeout(r, 1100));
     p.summaryZh = await translateBaidu(p.summary);
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 1100));
   }
 
   console.log(`  ✅ 共采集 ${result.length} 篇（已翻译）\n`);
@@ -389,7 +396,7 @@ function buildHTML(accountData) {
     </div>
     ${p.firstAffiliation ? `<div class="paper-affiliation">单位：${escapeHtml(p.firstAffiliation)}</div>` : ''}
     ${p.doi ? `<div class="paper-doi">DOI: <a href="https://doi.org/${escapeHtml(p.doi)}" target="_blank">${escapeHtml(p.doi)}</a></div>` : ''}
-    <div class="paper-summary">${escapeHtml((p.summaryZh || p.summary).substring(0, 350))}${(p.summaryZh || p.summary).length > 350 ? '…' : ''}</div>
+    <div class="paper-summary">${escapeHtml(p.summaryZh || p.summary)}</div>
     <div class="paper-topic-tag" style="background:${topicBadge};color:${topicColor}">${escapeHtml(p.topicName)}</div>
   </div>`;
     }
