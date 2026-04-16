@@ -87,6 +87,107 @@ async function translateBaidu(text) {
   }
 }
 
+// ========== PubMed API ==========
+function extractAuthorsFromPubMed(articleXml) {
+  const authorListMatch = articleXml.match(/<AuthorList[^>]*>([\s\S]*?)<\/AuthorList>/i);
+  if (!authorListMatch) return { names: [], firstAffiliation: '' };
+  const authors = [];
+  let firstAffiliation = '';
+  const authorBlocks = authorListMatch[1].split(/<\/Author>/i);
+  for (const block of authorBlocks) {
+    const lastName = extractField(block, 'LastName');
+    const foreName = extractField(block, 'ForeName');
+    if (lastName) {
+      const fullName = foreName ? `${foreName} ${lastName}` : lastName;
+      authors.push(fullName);
+      if (!firstAffiliation) {
+        const aff = extractField(block, 'Affiliation');
+        if (aff) firstAffiliation = aff;
+      }
+    }
+  }
+  return { names: authors, firstAffiliation };
+}
+
+function extractDoiFromPubMed(articleXml) {
+  const m = articleXml.match(/<ArticleId\s+IdType=["']doi["']\s*>([^<]*)<\/ArticleId>/i);
+  return m ? m[1] : '';
+}
+
+function extractAbstractFromPubMed(articleXml) {
+  const abstractMatch = articleXml.match(/<Abstract[^>]*>([\s\S]*?)<\/Abstract>/i);
+  if (!abstractMatch) return '';
+  const texts = [];
+  const regex = /<AbstractText(?:\s+Label=["'][^"']*["'])?\s*>([\s\S]*?)<\/AbstractText>/gi;
+  let match;
+  while ((match = regex.exec(abstractMatch[1])) !== null) {
+    texts.push(match[1].replace(/<[^>]+>/g, '').trim());
+  }
+  return texts.join(' ');
+}
+
+function extractPubDateFromPubMed(articleXml) {
+  const pubDateMatch = articleXml.match(/<PubDate>([\s\S]*?)<\/PubDate>/i);
+  if (pubDateMatch) {
+    const year = extractField(pubDateMatch[1], 'Year');
+    const month = extractField(pubDateMatch[1], 'Month');
+    const day = extractField(pubDateMatch[1], 'Day');
+    if (year) return [year, month, day].filter(Boolean).join('-');
+  }
+  const revisedMatch = articleXml.match(/<DateRevised>([\s\S]*?)<\/DateRevised>/i);
+  if (revisedMatch) {
+    const year = extractField(revisedMatch[1], 'Year');
+    const month = extractField(revisedMatch[1], 'Month');
+    const day = extractField(revisedMatch[1], 'Day');
+    if (year) return [year, month, day].filter(Boolean).join('-');
+  }
+  return '';
+}
+
+async function searchPubMed(term, maxResults = 20) {
+  const encodedTerm = encodeURIComponent(term);
+  const url = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodedTerm}&retmode=json&retmax=${maxResults}&sort=date`;
+  try {
+    const data = await fetchUrl(url);
+    const json = JSON.parse(data);
+    return json.esearchresult.idlist || [];
+  } catch (err) {
+    console.warn(`  ⚠️ PubMed esearch 失败: ${err.message}`);
+    return [];
+  }
+}
+
+async function fetchPubMedDetails(pmids) {
+  if (!pmids || pmids.length === 0) return [];
+  const ids = pmids.join(',');
+  const url = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${ids}&retmode=xml`;
+  try {
+    const xml = await fetchUrl(url);
+    const articles = xml.split('<PubmedArticle>').slice(1);
+    return articles.map(articleXml => {
+      const title = stripHtml(extractField(articleXml, 'ArticleTitle')).replace(/\s+/g, ' ');
+      const summary = extractAbstractFromPubMed(articleXml);
+      const published = extractPubDateFromPubMed(articleXml);
+      const doi = extractDoiFromPubMed(articleXml);
+      const { names, firstAffiliation } = extractAuthorsFromPubMed(articleXml);
+      const pmid = extractField(articleXml, 'PMID');
+      return {
+        title,
+        summary,
+        published,
+        doi,
+        authors: names.slice(0, 3).join(', '),
+        firstAffiliation,
+        url: pmid ? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/` : '',
+        source: 'PubMed'
+      };
+    }).filter(p => p.title && p.summary.length > 30);
+  } catch (err) {
+    console.warn(`  ⚠️ PubMed efetch 失败: ${err.message}`);
+    return [];
+  }
+}
+
 // ========== 论文采集 ==========
 function fetchUrl(url) {
   return new Promise((resolve, reject) => {
@@ -103,11 +204,19 @@ function fetchUrl(url) {
 
 function extractField(xml, field) {
   const m = xml.match(new RegExp(`<${field}[^>]*>([\\s\\S]*?)<\\/${field}>`, 'i'));
-  return m ? m[1].replace(/<[^>]+>/g, '').trim().substring(0, 300) : '';
+  return m ? stripHtml(m[1]).substring(0, 300) : '';
 }
 
 function stripHtml(text) {
-  return text.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&hellip;/g, '…').trim();
+  return text
+    .replace(/<[^>]+>/g, '')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&hellip;/g, '…')
+    .trim();
 }
 
 async function fetchArXiv(keywords, maxResults = 20) {
@@ -180,7 +289,7 @@ function scorePaper(paper, topic) {
 }
 
 async function fetchPapersForAccount(account) {
-  const { id, name, topicName, recipient, topics, paperLimit, perTopicLimit, prompt } = account;
+  const { id, name, topicName, recipient, topics, paperLimit, perTopicLimit, prompt, source } = account;
   const allPapers = [];
   const today = new Date().toISOString().split('T')[0];
 
@@ -190,12 +299,21 @@ async function fetchPapersForAccount(account) {
     const kwList = topic.keywords.slice(0, 3);
     console.log(`  🔍 [${topic.name}] 关键词: ${kwList.join(', ')}`);
 
-    const [rssPapers, apiPapers] = await Promise.all([
-      fetchRSS(topic.keywords),
-      fetchArXiv(kwList, 20)
-    ]);
+    let pool = [];
+    if (source === 'pubmed') {
+      const term = kwList.join(' AND ');
+      const pmids = await searchPubMed(term, 20);
+      if (pmids.length > 0) {
+        pool = await fetchPubMedDetails(pmids);
+      }
+    } else {
+      const [rssPapers, apiPapers] = await Promise.all([
+        fetchRSS(topic.keywords),
+        fetchArXiv(kwList, 20)
+      ]);
+      pool = [...rssPapers, ...apiPapers];
+    }
 
-    const pool = [...rssPapers, ...apiPapers];
     const filtered = pool.filter(p => {
       const text = (p.title + ' ' + p.summary).toLowerCase();
       return topic.keywords.some(k => text.includes(k.toLowerCase()));
@@ -253,7 +371,29 @@ function buildHTML(accountData) {
   const topicBadge = name.includes('医工') || name.includes('医') ? '#dcfce7' : '#dbeafe';
   const topicColor = name.includes('医工') || name.includes('医') ? '#166534' : '#1d4ed8';
 
-  const paperRows = papers.map((p, i) => `
+  const paperRows = papers.map((p, i) => {
+    const isPubMed = p.source === 'PubMed';
+    if (isPubMed) {
+      return `
+  <div class="paper">
+    <div class="paper-title">
+      ${i+1}. ${escapeHtml(p.titleZh || p.title)}
+    </div>
+    <div class="paper-original-title">
+      ${escapeHtml(p.title)}
+    </div>
+    <div class="paper-meta">
+      <span class="authors">${escapeHtml(p.authors)}</span> ·
+      <span class="date">${p.published ? p.published.substring(0, 10) : ''}</span> ·
+      <span class="score">相关度 ${p.score}</span>
+    </div>
+    ${p.firstAffiliation ? `<div class="paper-affiliation">单位：${escapeHtml(p.firstAffiliation)}</div>` : ''}
+    ${p.doi ? `<div class="paper-doi">DOI: <a href="https://doi.org/${escapeHtml(p.doi)}" target="_blank">${escapeHtml(p.doi)}</a></div>` : ''}
+    <div class="paper-summary">${escapeHtml((p.summaryZh || p.summary).substring(0, 350))}${(p.summaryZh || p.summary).length > 350 ? '…' : ''}</div>
+    <div class="paper-topic-tag" style="background:${topicBadge};color:${topicColor}">${escapeHtml(p.topicName)}</div>
+  </div>`;
+    }
+    return `
   <div class="paper">
     <div class="paper-title">
       ${i+1}. ${escapeHtml(p.titleZh || p.title)}
@@ -265,7 +405,8 @@ function buildHTML(accountData) {
     </div>
     <div class="paper-summary">${escapeHtml((p.summaryZh || p.summary).substring(0, 350))}${(p.summaryZh || p.summary).length > 350 ? '…' : ''}</div>
     <div class="paper-topic-tag" style="background:${topicBadge};color:${topicColor}">${escapeHtml(p.topicName)}</div>
-  </div>`).join('\n');
+  </div>`;
+  }).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -280,7 +421,11 @@ function buildHTML(accountData) {
   .paper{margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid #f0f0f0}
   .paper:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
   .paper-title{font-size:14px;font-weight:600;color:#1a1a2e;margin-bottom:4px;line-height:1.4}
+  .paper-original-title{font-size:12px;color:#555;font-style:italic;margin-bottom:6px;line-height:1.4}
   .paper-meta{font-size:12px;color:#888;margin-bottom:6px}
+  .paper-affiliation{font-size:12px;color:#444;margin-bottom:4px}
+  .paper-doi{font-size:12px;color:#1d4ed8;margin-bottom:6px}
+  .paper-doi a{color:#1d4ed8;text-decoration:none}
   .authors{font-weight:500;color:#555}
   .score{color:#f59e0b;font-weight:700}
   .paper-summary{font-size:13px;color:#555;line-height:1.6;margin-bottom:6px}

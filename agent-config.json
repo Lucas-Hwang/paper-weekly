@@ -12,8 +12,8 @@
     "from": "huangjiansong0630@163.com"
   },
   "baiduTranslate": {
-    "appid": "YOUR_BAIDU_APPID",
-    "key": "YOUR_BAIDU_KEY"
+    "appid": "20260415002594524",
+    "key": "hJ9RRj6FzlstlU3vOVe2"
   },
   "accounts": [
     {
@@ -65,6 +65,7 @@
       "id": "yanyu",
       "name": "医工交叉日报",
       "topicName": "医工",
+      "source": "pubmed",
       "recipient": "huangjiansong0630@163.com",
       "paperLimit": 8,
       "perTopicLimit": {
